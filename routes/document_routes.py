@@ -25,6 +25,52 @@ def _get_session_or_404(db, session_id: str, user: Optional[str]):
     return session
 
 
+def _embed_library_document(
+    doc_id: str, title: str, body_text: Optional[str], owner: Optional[str]
+) -> int:
+    """Chunk a Library document's extracted text and add it to the vector store.
+
+    Library imports write only to the SQL ``Document`` table; normal-chat RAG
+    (``chat_processor``) retrieves from the ChromaDB-backed vector store. Without
+    this step a Library document is never embedded, so it is invisible to
+    retrieval and only readable via per-message attachment. This mirrors the
+    personal-docs upload path in ``routes/personal_routes.py`` and uses the same
+    ``get_rag_manager()`` instance chat retrieval reads from, so the write lands
+    in the collection the search actually queries.
+
+    Best-effort: an unavailable or failing vector store must not break the
+    import itself. Returns the number of chunks written (0 if RAG is
+    unavailable or there is nothing to embed).
+    """
+    if not body_text or not body_text.strip():
+        return 0
+    try:
+        from src.rag_singleton import get_rag_manager
+
+        rag = get_rag_manager()
+        if not rag:
+            logger.info("[library-rag] RAG unavailable; skipped embedding doc %s", doc_id)
+            return 0
+        written = 0
+        for i, chunk in enumerate(rag._split_into_chunks(body_text)):
+            metadata = {
+                "source": f"library:{doc_id}",
+                "filename": title or "document",
+                "document_id": doc_id,
+                "type": "library",
+                "chunk_id": i,
+            }
+            if owner:
+                metadata["owner"] = owner
+            if rag.add_document(chunk, metadata):
+                written += 1
+        logger.info("[library-rag] embedded %d chunk(s) for library doc %s", written, doc_id)
+        return written
+    except Exception as e:
+        logger.warning("[library-rag] failed to embed library doc %s: %s", doc_id, e)
+        return 0
+
+
 def _aggregate_language_facets(lang_rows):
     """Sum document counts per display language for the library facet.
 
@@ -305,6 +351,12 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 doc.owner = user
                 db.commit()
                 db.refresh(doc)
+            # Embed the extracted text so the document is retrievable in normal
+            # chat (RAG), not only as a per-message attachment. Plain PDFs only
+            # for now: form PDFs store field markdown rather than prose and are
+            # handled separately. Best-effort — never fail the import over RAG.
+            if not is_form:
+                _embed_library_document(doc_id, title, body_text, doc.owner or user)
             return _doc_to_dict(doc)
         finally:
             db.close()
