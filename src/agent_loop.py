@@ -2620,6 +2620,14 @@ async def stream_agent_loop(
             "mcp__email__list_emails", "mcp__email__read_email",
         })
     _prompt_active_document = active_document if _active_document_relevant else None
+    _library_has_documents = False
+    try:
+        from src.rag_singleton import get_rag_manager
+        _rag_mgr = get_rag_manager()
+        if _rag_mgr:
+            _library_has_documents = bool(_rag_mgr.get_stats().get("document_count"))
+    except Exception:
+        logger.debug("[agent-intent] library document-count check failed", exc_info=True)
     _direct_low_signal = (
         _low_signal_turn
         and not _existing_conversation
@@ -2630,6 +2638,7 @@ async def stream_agent_loop(
         and (_casual_low_signal_turn or not _active_document_relevant)
         and (_casual_low_signal_turn or not active_email)
         and (_casual_low_signal_turn or not workspace)
+        and (_casual_low_signal_turn or not _library_has_documents)
         and not forced_tools
         and not relevant_tools
     )
@@ -2637,12 +2646,13 @@ async def stream_agent_loop(
     # user turns only for explicit continuations ("yes", "do it", "1").
     _retrieval_query = str(_intent.get("retrieval_query") or _last_user)
     logger.info(
-        "[agent-intent] latest=%r continuation=%s low_signal=%s domains=%s active_doc_relevant=%s retrieval_query=%r",
+        "[agent-intent] latest=%r continuation=%s low_signal=%s domains=%s active_doc_relevant=%s library_has_documents=%s retrieval_query=%r",
         _last_user[:120],
         bool(_intent.get("continuation")),
         _low_signal_turn,
         sorted(_intent.get("domains") or []),
         _active_document_relevant,
+        _library_has_documents,
         _retrieval_query[:200],
     )
     if _low_signal_turn and _existing_conversation:
