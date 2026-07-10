@@ -2862,7 +2862,9 @@ async def stream_agent_loop(
     # Do not leak document tools into unrelated turns just because the editor
     # panel is open.
     if _relevant_tools is not None and _active_document_relevant:
-        _relevant_tools.update({"edit_document", "update_document", "suggest_document"})
+        _relevant_tools.update({
+            "edit_document", "update_document", "suggest_document", "manage_documents",
+        })
         if _active_email_draft_relevant:
             # The open compose document already contains the recipient,
             # subject, source UID, and quoted previous-message excerpt. Reading
@@ -2957,7 +2959,7 @@ async def stream_agent_loop(
     if _ody_doc_finetune_mode and _relevant_tools is not None:
         if _prompt_active_document is not None:
             _relevant_tools = {
-                "edit_document", "update_document", "suggest_document",
+                "edit_document", "update_document", "suggest_document", "manage_documents",
                 "ask_user", "update_plan",
             }
         else:
